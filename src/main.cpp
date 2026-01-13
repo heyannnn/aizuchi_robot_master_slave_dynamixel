@@ -84,7 +84,6 @@ void setup() {
     // delay(100);
 
     // Setup display
-    M5.Display.clear();
     M5.Display.setTextSize(1.5);
     M5.Display.setCursor(10, 10);
     M5.Display.println("Motor + Encoder Control");
@@ -147,10 +146,15 @@ void setup() {
         delay(2000);
     }
 
+    // Initialize Serial for debug
+    Serial.begin(115200);
+    delay(500);
+    Serial.println("=== Starting System ===");
+
     Serial1.begin(DXL_BAUD_RATE, SERIAL_8N1, RXD_PIN, TXD_PIN);
 
     dxl.begin(DXL_BAUD_RATE);
- 
+
     dxl.setPortProtocolVersion(DXL_PROTOCOL_VERSION);
 
     // ========================================================================
@@ -158,11 +162,15 @@ void setup() {
     // ========================================================================
     M5.Display.setCursor(10, 50);
     M5.Display.println("Initializing motors...");
+    Serial.println("=== Motor Init ===");
 
     for (int i = 0; i < NUM_MOTORS; i++) {
         // Check master motor
+        Serial.printf("Pinging Master %d...", MASTER_IDS[i]);
         if (dxl.ping(MASTER_IDS[i])) {
+            Serial.println("FOUND");
             M5.Display.setCursor(10, 70 + i*20);
+            M5.Display.setTextColor(GREEN);
             M5.Display.printf("Master %d: OK", MASTER_IDS[i]);
 
             dxl.torqueOff(MASTER_IDS[i]);
@@ -170,11 +178,19 @@ void setup() {
             dxl.setOperatingMode(MASTER_IDS[i], OP_POSITION);
             delay(50);
             dxl.torqueOn(MASTER_IDS[i]);
+        } else {
+            Serial.println("FAILED");
+            M5.Display.setCursor(10, 70 + i*20);
+            M5.Display.setTextColor(RED);
+            M5.Display.printf("Master %d: FAIL", MASTER_IDS[i]);
         }
 
         // Check slave motor
+        Serial.printf("Pinging Slave %d...", SLAVE_IDS[i]);
         if (dxl.ping(SLAVE_IDS[i])) {
+            Serial.println("FOUND");
             M5.Display.setCursor(10, 150 + i*20);
+            M5.Display.setTextColor(GREEN);
             M5.Display.printf("Slave %d: OK", SLAVE_IDS[i]);
 
             dxl.torqueOff(SLAVE_IDS[i]);
@@ -182,8 +198,18 @@ void setup() {
             dxl.setOperatingMode(SLAVE_IDS[i], OP_POSITION);
             delay(50);
             dxl.torqueOn(SLAVE_IDS[i]);
+        } else {
+            Serial.println("FAILED");
+            M5.Display.setCursor(10, 150 + i*20);
+            M5.Display.setTextColor(RED);
+            M5.Display.printf("Slave %d: FAIL", SLAVE_IDS[i]);
         }
     }
+
+    M5.Display.setTextColor(WHITE);
+
+    delay(2000);  // Show motor init status for 2 seconds
+    M5.Display.clear();  // Clear once before entering loop
 }
 
 
@@ -193,18 +219,21 @@ void setup() {
 
     void displayInfo() {
         static unsigned long last_display_update = 0;
-        if (millis() - last_display_update < 200) return;  // Update display every 200ms
+        if (millis() - last_display_update < 100) return;  // Update every 100ms (faster)
         last_display_update = millis();
 
-        M5.Display.clear();
         M5.Display.setCursor(10, 10);
         M5.Display.printf("=== Master-Slave Control ===");
 
+        // Clear and display polling rate
+        M5.Display.fillRect(10, 40, 300, 20, BLACK);
         M5.Display.setCursor(10, 40);
         M5.Display.printf("Polling Rate: %d Hz", polling_rate);
 
         if (encoder_found) {
             int32_t encoder_ch1 = encoder.getEncoderValue(0);
+            // Clear and display encoder value
+            M5.Display.fillRect(10, 60, 300, 20, BLACK);
             M5.Display.setCursor(10, 60);
             M5.Display.printf("Encoder CH1: %ld", encoder_ch1);
         }
@@ -214,11 +243,19 @@ void setup() {
             int32_t master_pos = dxl.getPresentPosition(MASTER_IDS[i]);
             int32_t slave_pos = dxl.getPresentPosition(SLAVE_IDS[i]);
 
+            // Clear master line
+            M5.Display.fillRect(10, 90 + i*40, 300, 20, BLACK);
             M5.Display.setCursor(10, 90 + i*40);
+            M5.Display.setTextColor(WHITE);
             M5.Display.printf("M%d: %ld", MASTER_IDS[i], master_pos);
+
+            // Clear slave line
+            M5.Display.fillRect(10, 110 + i*40, 300, 20, BLACK);
             M5.Display.setCursor(10, 110 + i*40);
+            M5.Display.setTextColor(GREEN);
             M5.Display.printf("S%d: %ld", SLAVE_IDS[i], slave_pos);
         }
+        M5.Display.setTextColor(WHITE);
     }
 
 // ============================================================================
@@ -247,10 +284,13 @@ void setup() {
       }
 
       // Read master positions and write to slaves
-      for (int i = 0; i < NUM_MOTORS; i++) {
-          int32_t master_position = dxl.getPresentPosition(MASTER_IDS[i]);
-          dxl.setGoalPosition(SLAVE_IDS[i], master_position);
-      }
+        for (int i = 0; i < NUM_MOTORS; i++) {
+            int32_t master_pos = dxl.getPresentPosition(MASTER_IDS[i]);
+            int32_t master_vel = dxl.getPresentVelocity(MASTER_IDS[i]);
+
+            dxl.setGoalPosition(SLAVE_IDS[i], master_pos);
+            dxl.setProfileVelocity(SLAVE_IDS[i], abs(master_vel) + 50); // Match speed + margin
+        }
 
       // Display info
       displayInfo();

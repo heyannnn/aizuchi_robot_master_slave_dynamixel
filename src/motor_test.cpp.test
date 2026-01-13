@@ -1,0 +1,172 @@
+// ============================================================================
+// SIMPLE MOTOR TEST - Test single motor ID 10
+// ============================================================================
+#include <M5Unified.h>
+#include <Dynamixel2Arduino.h>
+
+// Pin configuration
+#define DXL_SERIAL Serial1
+#define TXD_PIN 7
+#define RXD_PIN 10
+#define DXL_DIR_PIN 6
+
+// Motor settings
+const uint8_t TEST_MOTOR_ID = 10;
+const float DXL_PROTOCOL_VERSION = 2.0;
+const uint32_t DXL_BAUD_RATE = 1000000;
+
+// Create Dynamixel controller
+Dynamixel2Arduino dxl(DXL_SERIAL, DXL_DIR_PIN);
+
+// Control table addresses
+#define ADDR_TORQUE_ENABLE 64
+
+void setup() {
+    // Initialize M5Stack
+    auto cfg = M5.config();
+    M5.begin(cfg);
+    M5.Power.setExtOutput(true);
+
+    // Setup display
+    M5.Display.clear();
+    M5.Display.setTextSize(2);
+    M5.Display.setCursor(10, 10);
+    M5.Display.println("Motor Test ID 10");
+
+    // Initialize serial for debug
+    Serial.begin(115200);
+    delay(1000);
+    Serial.println("=== Motor Test Starting ===");
+
+    // Initialize Dynamixel
+    Serial1.begin(DXL_BAUD_RATE, SERIAL_8N1, RXD_PIN, TXD_PIN);
+    dxl.begin(DXL_BAUD_RATE);
+    dxl.setPortProtocolVersion(DXL_PROTOCOL_VERSION);
+
+    M5.Display.setCursor(10, 40);
+    M5.Display.println("Pinging motor...");
+    Serial.println("Pinging motor ID 10...");
+
+    // Try to ping motor
+    if (dxl.ping(TEST_MOTOR_ID)) {
+        M5.Display.setCursor(10, 70);
+        M5.Display.setTextColor(GREEN);
+        M5.Display.println("Motor 10 FOUND!");
+        Serial.println("SUCCESS: Motor 10 found!");
+
+        // Get model number
+        uint16_t model = dxl.getModelNumber(TEST_MOTOR_ID);
+        M5.Display.setCursor(10, 100);
+        M5.Display.printf("Model: %d", model);
+        Serial.printf("Model number: %d\n", model);
+
+        // AGGRESSIVE TORQUE ENABLE with retries
+        M5.Display.setCursor(10, 130);
+        M5.Display.println("Enabling torque...");
+        Serial.println("Attempting torque with retries...");
+
+        bool torque_success = false;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            Serial.printf("Attempt %d: ", attempt + 1);
+
+            // Direct write to torque enable
+            bool write_ok = dxl.writeControlTableItem(ADDR_TORQUE_ENABLE, TEST_MOTOR_ID, 1);
+            delay(150);
+
+            // Verify
+            uint8_t status = dxl.readControlTableItem(ADDR_TORQUE_ENABLE, TEST_MOTOR_ID);
+            Serial.printf("Write=%d Read=%d\n", write_ok, status);
+
+            if (status == 1) {
+                torque_success = true;
+                break;
+            }
+            delay(200);
+        }
+
+        M5.Display.setCursor(10, 160);
+        if (torque_success) {
+            M5.Display.setTextColor(GREEN);
+            M5.Display.println("Torque ON!");
+
+            int32_t pos = dxl.getPresentPosition(TEST_MOTOR_ID);
+            M5.Display.setCursor(10, 190);
+            M5.Display.printf("Pos: %ld", pos);
+        } else {
+            M5.Display.setTextColor(RED);
+            M5.Display.println("FAILED after 10 tries");
+        }
+
+        M5.Display.setCursor(10, 220);
+        M5.Display.setTextColor(WHITE);
+        M5.Display.println("Ready to test!");
+
+    } else {
+        M5.Display.setCursor(10, 70);
+        M5.Display.setTextColor(RED);
+        M5.Display.println("Motor NOT FOUND!");
+        Serial.println("ERROR: Motor 10 not responding");
+
+        M5.Display.setCursor(10, 100);
+        M5.Display.setTextColor(WHITE);
+        M5.Display.println("Check:");
+        M5.Display.setCursor(10, 120);
+        M5.Display.println("- Wiring");
+        M5.Display.setCursor(10, 140);
+        M5.Display.println("- Power 12V");
+        M5.Display.setCursor(10, 160);
+        M5.Display.println("- Motor ID=10");
+        M5.Display.setCursor(10, 180);
+        M5.Display.println("- Baudrate=1M");
+    }
+
+    delay(3000);
+}
+
+void loop() {
+    M5.update();
+
+    // Only run if motor was found
+    static bool motor_found = dxl.ping(TEST_MOTOR_ID);
+    if (!motor_found) {
+        delay(1000);
+        return;
+    }
+
+    // Read current position
+    int32_t current_pos = dxl.getPresentPosition(TEST_MOTOR_ID);
+
+    // Move back and forth between two positions
+    static unsigned long last_move = 0;
+    static bool direction = true;
+
+    if (millis() - last_move > 2000) {  // Move every 2 seconds
+        last_move = millis();
+
+        int32_t target_pos;
+        if (direction) {
+            target_pos = current_pos + 512;  // Move +45 degrees
+        } else {
+            target_pos = current_pos - 512;  // Move -45 degrees
+        }
+
+        direction = !direction;
+
+        M5.Display.clear();
+        M5.Display.setCursor(10, 10);
+        M5.Display.println("=== Motor Test ===");
+        M5.Display.setCursor(10, 50);
+        M5.Display.printf("Current: %ld", current_pos);
+        M5.Display.setCursor(10, 80);
+        M5.Display.printf("Target:  %ld", target_pos);
+
+        Serial.printf("Moving from %ld to %ld\n", current_pos, target_pos);
+
+        dxl.setGoalPosition(TEST_MOTOR_ID, target_pos);
+
+        M5.Display.setCursor(10, 110);
+        M5.Display.println("Moving...");
+    }
+
+    delay(100);
+}
